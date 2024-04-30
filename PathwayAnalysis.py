@@ -1,5 +1,6 @@
 import requests
 import regex as re
+import random
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -52,29 +53,29 @@ class PathwayAnalysis:
             print("No pickle file passed: creating pairs")
             self.__sort_into_pairs()
 
-        self.A_sc = self.__PIRM_accuracy(self.severe, self.control, self.A)
-        self.B_sc = self.__PIRM_accuracy(self.severe, self.control, self.B)
-        self.A_sm = self.__PIRM_accuracy(self.severe, self.mild, self.A)
-        self.B_sm = self.__PIRM_accuracy(self.severe, self.mild, self.B)
-        self.A_mc = self.__PIRM_accuracy(self.mild, self.control, self.A)
-        self.B_mc = self.__PIRM_accuracy(self.mild, self.control, self.B)
+        self.pathway_pairs_sc = self.__PIRM_accuracy(self.severe, self.control, self.pathway_pairs)
+        self.non_pathway_pairs_sc = self.__PIRM_accuracy(self.severe, self.control, self.non_pathway_pairs)
+        self.pathway_pairs_sm = self.__PIRM_accuracy(self.severe, self.mild, self.pathway_pairs)
+        self.non_pathway_pairs_sm = self.__PIRM_accuracy(self.severe, self.mild, self.non_pathway_pairs)
+        self.pathway_pairs_mc = self.__PIRM_accuracy(self.mild, self.control, self.pathway_pairs)
+        self.non_pathway_pairs_mc = self.__PIRM_accuracy(self.mild, self.control, self.non_pathway_pairs)
 
         self.df = pd.DataFrame(
             {
-                "pair": self.A + self.B,
-                "mcc_sc": list(self.A_sc["mcc"]) + list(self.B_sc["mcc"]),
-                "f1_sc": list(self.A_sc["f1"]) + list(self.B_sc["f1"]),
-                "spec_sc": list(self.A_sc["spec"]) + list(self.B_sc["spec"]),
-                "sens_sc": list(self.A_sc["sens"]) + list(self.B_sc["sens"]),
-                "mcc_mc": list(self.A_mc["mcc"]) + list(self.B_mc["mcc"]),
-                "f1_mc": list(self.A_mc["f1"]) + list(self.B_mc["f1"]),
-                "spec_mc": list(self.A_mc["spec"]) + list(self.B_mc["spec"]),
-                "sens_mc": list(self.A_mc["sens"]) + list(self.B_mc["sens"]),
-                "mcc_sm": list(self.A_sm["mcc"]) + list(self.B_sm["mcc"]),
-                "f1_sm": list(self.A_sm["f1"]) + list(self.B_sm["f1"]),
-                "spec_sm": list(self.A_sm["spec"]) + list(self.B_sm["spec"]),
-                "sens_sm": list(self.A_sm["sens"]) + list(self.B_sm["sens"]),
-                "pathways": [1] * len(self.A) + [0] * len(self.B),
+                "pair": self.pathway_pairs + self.non_pathway_pairs,
+                "mcc_sc": list(self.pathway_pairs_sc["mcc"]) + list(self.non_pathway_pairs_sc["mcc"]),
+                "f1_sc": list(self.pathway_pairs_sc["f1"]) + list(self.non_pathway_pairs_sc["f1"]),
+                "spec_sc": list(self.pathway_pairs_sc["spec"]) + list(self.non_pathway_pairs_sc["spec"]),
+                "sens_sc": list(self.pathway_pairs_sc["sens"]) + list(self.non_pathway_pairs_sc["sens"]),
+                "mcc_mc": list(self.pathway_pairs_mc["mcc"]) + list(self.non_pathway_pairs_mc["mcc"]),
+                "f1_mc": list(self.pathway_pairs_mc["f1"]) + list(self.non_pathway_pairs_mc["f1"]),
+                "spec_mc": list(self.pathway_pairs_mc["spec"]) + list(self.non_pathway_pairs_mc["spec"]),
+                "sens_mc": list(self.pathway_pairs_mc["sens"]) + list(self.non_pathway_pairs_mc["sens"]),
+                "mcc_sm": list(self.pathway_pairs_sm["mcc"]) + list(self.non_pathway_pairs_sm["mcc"]),
+                "f1_sm": list(self.pathway_pairs_sm["f1"]) + list(self.non_pathway_pairs_sm["f1"]),
+                "spec_sm": list(self.pathway_pairs_sm["spec"]) + list(self.non_pathway_pairs_sm["spec"]),
+                "sens_sm": list(self.pathway_pairs_sm["sens"]) + list(self.non_pathway_pairs_sm["sens"]),
+                "pathways": [1] * len(self.pathway_pairs) + [0] * len(self.non_pathway_pairs),
             }
         )
 
@@ -87,28 +88,32 @@ class PathwayAnalysis:
         pathways. It then saves the data as a pickle because it takes a long
         time to generate
         """
-        A = []
-        num_pathways = []
-        B = []
+        self.pathway_pairs = []
+        self.num_pathways = []
+        self.non_pathway_pairs = []
+        self.all_pathways = []
         pairs = list(combinations(self.genes, 2))
         for pair in tqdm(pairs):
-            pathways = self.pathways_in_common(pair)
+            pathways = self.__pathways_in_common(pair)
             if pathways != -1 and len(pathways):
-                A.append(pair)
-                num_pathways.append(len(pathways))
+                self.pathway_pairs.append(pair)
+                self.num_pathways.append(len(pathways))
+                self.all_pathways += pathways
             elif self.__is_interactions(pair):
-                A.append(pair)
-                num_pathways.append(0)
+                self.pathway_pairs.append(pair)
+                self.num_pathways.append(0)
             else:
-                B.append(pair)
-        with open("A_B.pkl", "wb") as f:
-            pickle.dump((A, B, num_pathways), f)
+                self.non_pathway_pairs.append(pair)
+        self.all_pathways = list(set(self.all_pathways))
+        self.pathway_dict = self.__make_pathway_dict()
+        with open("pairs.pkl", "wb") as f:
+            pickle.dump((self.pathway_pairs, self.non_pathway_pairs, self.num_pathways, self.all_pathways, self.pathway_dict), f)
 
     def __load_pairs(self, p):
         with open(p, "rb") as f:
-            self.A, self.B, self.num_pathways = pickle.load(f)
+            self.pathway_pairs, self.non_pathway_pairs, self.num_pathways, self.all_pathways, self.pathway_dict = pickle.load(f)
 
-    def pathways_in_common(self, pair):
+    def __pathways_in_common(self, pair):
         gene1, gene2 = pair
         pattern = r'"name":"(.*?)","dataSource":'
         gene_1_pathways = re.findall(
@@ -167,6 +172,19 @@ class PathwayAnalysis:
         results = results.sort_values(by="pair")
         results = results.dropna(subset=["pair"])
         return results
+
+    def __make_pathway_dict(self):
+        d = {key: [] for key in self.all_pathways}
+        
+        for pair in self.pathway_pairs:
+            p = self.__pathways_in_common(pair)
+            if p != -1:
+                for pathway in p:
+                    if pair[0] not in d[pathway]:
+                        d[pathway].append(pair[0])
+                    if pair[1] not in d[pathway]:
+                        d[pathway].append(pair[1])
+        return d
     
     def __get_search_cols(self, contrast, metric):
         search_col_map = {
@@ -233,23 +251,23 @@ class PathwayAnalysis:
     def hist(self):
         _, axes = plt.subplots(2, 3, figsize=(20, 10))
         self.__hist_axis(
-            axes[0, 0], "Severe vs Control (sens)", self.A_sc[0], self.B_sc[0]
+            axes[0, 0], "Severe vs Control (sens)", self.pathway_pairs_sc[0], self.non_pathway_pairs_sc[0]
         )
         self.__hist_axis(
-            axes[0, 1], "Mild vs Control (sens)", self.A_mc[0], self.B_mc[0]
+            axes[0, 1], "Mild vs Control (sens)", self.pathway_pairs_mc[0], self.non_pathway_pairs_mc[0]
         )
         self.__hist_axis(
-            axes[0, 2], "Severe vs Mild (sens)", self.A_sm[0], self.B_sm[0]
+            axes[0, 2], "Severe vs Mild (sens)", self.pathway_pairs_sm[0], self.non_pathway_pairs_sm[0]
         )
 
         self.__hist_axis(
-            axes[1, 0], "Severe vs Control (spec)", self.A_sc[1], self.B_sc[1]
+            axes[1, 0], "Severe vs Control (spec)", self.pathway_pairs_sc[1], self.non_pathway_pairs_sc[1]
         )
         self.__hist_axis(
-            axes[1, 1], "Mild vs Control (spec)", self.A_mc[1], self.B_mc[1]
+            axes[1, 1], "Mild vs Control (spec)", self.pathway_pairs_mc[1], self.non_pathway_pairs_mc[1]
         )
         self.__hist_axis(
-            axes[1, 2], "Severe vs Mild (spec)", self.A_sm[1], self.B_sm[1]
+            axes[1, 2], "Severe vs Mild (spec)", self.pathway_pairs_sm[1], self.non_pathway_pairs_sm[1]
         )
         plt.savefig("figures/histograms.png")
         plt.show()
@@ -264,7 +282,6 @@ class PathwayAnalysis:
             return list(filtered_df[filtered_df["pathways"] == 1]["pair"])
         elif pathways == False:
             return list(filtered_df[filtered_df["pathways"] == 0]["pair"])
-
         return list(filtered_df["pair"])
 
     def prob_pathways(self, range: tuple, contrast=None, metric=None):
@@ -276,6 +293,7 @@ class PathwayAnalysis:
             return pathways / (pathways + no_pathways)
         except:
             return 0
+        
 
     def get_regression(self):
         mild_reg = Regressions(X=np.array(self.mild).T)
@@ -298,25 +316,25 @@ class PathwayAnalysis:
 
         no_pathway = pd.DataFrame(
             {
-                'mild_SSres':[mild_SSres.loc[pair[0], pair[1]] for pair in self.B],
-                'mild_R2':[mild_R2.loc[pair[0], pair[1]] for pair in self.B],
-                'severe_SSres':[severe_SSres.loc[pair[0], pair[1]] for pair in self.B],
-                'severe_R2':[severe_R2.loc[pair[0], pair[1]] for pair in self.B],
-                'control_SSres':[control_SSres.loc[pair[0], pair[1]] for pair in self.B],
-                'control_R2':[control_R2.loc[pair[0], pair[1]] for pair in self.B]
+                'mild_SSres':[mild_SSres.loc[pair[0], pair[1]] for pair in self.non_pathway_pairs],
+                'mild_R2':[mild_R2.loc[pair[0], pair[1]] for pair in self.non_pathway_pairs],
+                'severe_SSres':[severe_SSres.loc[pair[0], pair[1]] for pair in self.non_pathway_pairs],
+                'severe_R2':[severe_R2.loc[pair[0], pair[1]] for pair in self.non_pathway_pairs],
+                'control_SSres':[control_SSres.loc[pair[0], pair[1]] for pair in self.non_pathway_pairs],
+                'control_R2':[control_R2.loc[pair[0], pair[1]] for pair in self.non_pathway_pairs]
             },
-            index=self.B
+            index=self.non_pathway_pairs
         )
         pathway = pd.DataFrame(
             {
-                'mild_SSres':[mild_SSres.loc[pair[0], pair[1]] for pair in self.A],
-                'mild_R2':[mild_R2.loc[pair[0], pair[1]] for pair in self.A],
-                'severe_SSres':[severe_SSres.loc[pair[0], pair[1]] for pair in self.A],
-                'severe_R2':[severe_R2.loc[pair[0], pair[1]] for pair in self.A],
-                'control_SSres':[control_SSres.loc[pair[0], pair[1]] for pair in self.A],
-                'control_R2':[control_R2.loc[pair[0], pair[1]] for pair in self.A]
+                'mild_SSres':[mild_SSres.loc[pair[0], pair[1]] for pair in self.pathway_pairs],
+                'mild_R2':[mild_R2.loc[pair[0], pair[1]] for pair in self.pathway_pairs],
+                'severe_SSres':[severe_SSres.loc[pair[0], pair[1]] for pair in self.pathway_pairs],
+                'severe_R2':[severe_R2.loc[pair[0], pair[1]] for pair in self.pathway_pairs],
+                'control_SSres':[control_SSres.loc[pair[0], pair[1]] for pair in self.pathway_pairs],
+                'control_R2':[control_R2.loc[pair[0], pair[1]] for pair in self.pathway_pairs]
             },
-            index=self.A
+            index=self.pathway_pairs
         )
 
         return no_pathway, pathway
@@ -330,10 +348,34 @@ class PathwayAnalysis:
         d = len(col_pathways[(col_pathways[col] < 0.5) & (col_pathways['pathways'] == 0)])
         return pd.DataFrame({'>= 0.5': [a,b], '< 0.5': [c,d]}, index=['pathways','no pathways'])
     
-    def accuracies_for_gene(self, gene):
-        fig, axs = plt.subplots(4, 3, figsize=(20, 20))
+    def accuracies_for_gene(self, genes = None, pathway = None):
+        _, axs = plt.subplots(4, 3, figsize=(20, 20))
+        if genes == None:
+            print(pathway, self.pathway_dict[pathway])
+            genes = self.pathway_dict[pathway]
         for i, col in enumerate(self.df.columns[1:-1]):
-            rows_containing_gene = self.df.loc[self.df['pair'].astype(str).str.contains(gene)]
-            axs[i%4,i//4].boxplot([rows_containing_gene[col], self.df[col]], labels=[f'containing {gene}', f'all accuracies'])
+            rows_containing_gene = self.df.loc[self.df['pair'].astype(str).str.contains('|'.join(genes))]
+            axs[i%4,i//4].boxplot([rows_containing_gene[col], self.df[col]], labels=[f'containing select genes', f'all accuracies'])
             axs[i%4,i//4].set_title(col)
         plt.show()
+    
+    def get_pathway_pair(self):
+        gene_list = random.choice(list(self.pathway_dict.values()))
+        pair = random.sample(gene_list, 2)
+        sc = self.__PIRM_accuracy(self.severe, self.control, [tuple(pair)])
+        mc = self.__PIRM_accuracy(self.mild, self.control, [tuple(pair)])
+        sm = self.__PIRM_accuracy(self.severe, self.mild, [tuple(pair)])
+        df =  pd.concat([sc, mc, sm])
+        df.index = ['sc' ,'mc', 'sm']
+        return df
+    
+    def get_random_pair(self):
+        two_pathways = random.sample(sorted(self.pathway_dict.values()), 2)
+        gene1 = random.choice(two_pathways[0])
+        gene2 = random.choice([x for x in two_pathways[1] if x != gene1])
+        sc = self.__PIRM_accuracy(self.severe, self.control, [(gene1, gene2)])
+        mc = self.__PIRM_accuracy(self.mild, self.control, [(gene1, gene2)])
+        sm = self.__PIRM_accuracy(self.severe, self.mild, [(gene1, gene2)])
+        df =  pd.concat([sc, mc, sm])
+        df.index = ['sc' ,'mc', 'sm']
+        return df
