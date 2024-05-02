@@ -1,8 +1,8 @@
 import requests
 import regex as re
-import random
 import pandas as pd
 import numpy as np
+np.random.seed(42)
 from tqdm import tqdm
 from itertools import combinations
 from collections import defaultdict
@@ -17,8 +17,8 @@ class PathwayAnalysis:
         self.to_ensembl = pd.read_csv(gene_path).set_index("name")["code"].to_dict()
         unfiltered_counts = np.log1p(pd.read_csv(rnacounts_path, index_col=0))
         codes = [g for g in list(pd.read_csv(gene_path)["code"]) if g in unfiltered_counts.index]
-        self.counts = unfiltered_counts.loc[codes]
-        self.genes = [self.to_name[x] for x in codes]
+        self.counts = unfiltered_counts.loc[list(set(codes))]
+        self.genes = list(set([self.to_name[x] for x in codes]))
         self.meta = pd.read_csv(metadata_path, header=None, names=["sample", "class"])
 
         self.mild = self.counts[self.meta.loc[self.meta["class"] == "Mild", "sample"].tolist()]
@@ -36,6 +36,8 @@ class PathwayAnalysis:
                     "https://www.pathwaycommons.org/pc2/top_pathways?q=" + g
                 ).text,
             )
+
+        self.d = d
 
         self.pathways_to_genes = defaultdict(list)
         for gene, pathways in d.items():
@@ -404,24 +406,3 @@ class PathwayAnalysis:
             )
             axs[i % 4, i // 4].set_title(col)
         plt.show()
-
-    def get_pathway_pair(self):
-        gene_list = random.choice(list(self.pathways_to_genes.values()))
-        pair = random.sample(gene_list, 2)
-        sc = self.__PIRM_accuracy(self.severe, self.control, [tuple(pair)])
-        mc = self.__PIRM_accuracy(self.mild, self.control, [tuple(pair)])
-        sm = self.__PIRM_accuracy(self.severe, self.mild, [tuple(pair)])
-        df = pd.concat([sc, mc, sm])
-        df.index = ["sc", "mc", "sm"]
-        return df
-
-    def get_random_pair(self):
-        two_pathways = random.sample(sorted(self.pathways_to_genes.values()), 2)
-        gene1 = random.choice(two_pathways[0])
-        gene2 = random.choice([x for x in two_pathways[1] if x != gene1])
-        sc = self.__PIRM_accuracy(self.severe, self.control, [(gene1, gene2)])
-        mc = self.__PIRM_accuracy(self.mild, self.control, [(gene1, gene2)])
-        sm = self.__PIRM_accuracy(self.severe, self.mild, [(gene1, gene2)])
-        df = pd.concat([sc, mc, sm])
-        df.index = ["sc", "mc", "sm"]
-        return df
